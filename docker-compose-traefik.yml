@@ -1,0 +1,85 @@
+services:
+  traefik:
+    image: traefik:v3.0
+    hostname: 'traefik.yourdoman.com'
+    ports:
+      - '80:80'
+      - '443:443'
+    environment:
+      - "CLOUDFLARE_DNS_API_TOKEN=<Your-CF-token-here>"
+    command:
+      - --providers.docker=true
+      - --api=true
+      # active dashboard (turn off in product enviroment)
+      - --api.dashboard=true
+      # Log
+      - --log.level=DEBUG
+      - --log.filepath=/var/log/traefik/main.log
+      - --accesslog=true
+      - --accesslog.filepath=/var/log/traefik/access.log
+      # Create an entrypoint "http" listening on address 80
+      - --entrypoints.web.address=:80
+      # Create an entrypoint "https" listening on address 443
+      - --entrypoints.websecure.address=:443
+      # Auto redirect to HTTPS (TLS)
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entryPoints.web.http.redirections.entrypoint.scheme=https
+      # Set up the TLS configuration for our websecure listener
+      # remove next line when using Traefik v2
+      - --entrypoints.websecure.asDefault=true
+      
+      - --certificatesresolvers.myresolver.acme.dnschallenge=true
+      - --certificatesresolvers.myresolver.acme.dnschallenge.delaybeforecheck=0
+      - --certificatesresolvers.myresolver.acme.dnschallenge.provider=cloudflare
+      # - --certificatesresolvers.myresolver.acme.dnschallenge.resolvers=1.1.1.1:53,8.8.8.8:53
+      # !!! IMPORTANT! Comment out or delete next line in production! !!!
+      # - --certificatesresolvers.myresolver.acme.caserver=https://acme-staging-v02.api.letsencrypt.org/directory
+      - --certificatesresolvers.myresolver.acme.email=<your-mail-here>
+      - --certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json
+      # Set up the TLS configuration for our websecure listener
+      - --entrypoints.websecure.http.tls=true
+      - --entrypoints.websecure.http.tls.certResolver=myresolver
+      - --entrypoints.websecure.http.tls.domains[0].main=yourdoman.com
+      - --entrypoints.websecure.http.tls.domains[0].sans=*.yourdoman.com
+    labels:
+      # Enable Traefik for this service, to make it available in the public network
+      - traefik.enable=true
+      # Use the proxy network to join traefik (declared below)
+      - traefik.docker.network=proxy
+      # It can be re-used by other stacks in other Docker Compose files 
+      # https-redirect middleware to redirect HTTP to HTTPS
+      - traefik.http.middlewares.https-redirect.redirectscheme.scheme=https
+      - traefik.http.middlewares.https-redirect.redirectscheme.permanent=true
+      # http auto redirect to https
+      - traefik.http.routers.dashboard.entrypoints=web
+      - traefik.http.routers.dashboard.rule=Host(`traefik.yourdoman.com`)
+      - traefik.http.routers.dashboard.middlewares=https-redirect
+      # traefik-https the actual router using HTTPS
+      - traefik.http.routers.dashboard-secure.rule=Host(`traefik.yourdoman.com`)
+      - traefik.http.routers.dashboard-secure.entrypoints=websecure
+      # Enable TLS
+      - traefik.http.routers.dashboard-secure.tls=true
+      - traefik.http.routers.dashboard-secure.service=api@internal
+      - traefik.http.routers.dashboard-secure.tls.certresolver=myresolver
+      - traefik.http.routers.dashboard-secure.middlewares=myauth
+      # dummy service fro swarm port detection.
+      - traefik.http.services.dashboard.loadbalancer.server.port=8080
+      # Account: admin/Admin@123
+      - "traefik.http.middlewares.myauth.basicauth.users=admin:$$apr1$$ekn6mbFe$$4Oe0X1eC9DUbpYgF7pWfY."
+    networks:
+      - proxy
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - letsencrypt:/letsencrypt
+      - logs:/var/log/traefik
+
+volumes:
+  letsencrypt:
+  logs:
+
+networks:
+  proxy:
+    name: proxy
+    driver: overlay
+    attachable: true

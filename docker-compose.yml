@@ -1,0 +1,121 @@
+services:
+  traefik:
+    image: traefik:v3.1
+    container_name: traefik
+    command: --api.insecure=true --providers.docker
+    ports:
+      - "80:80"
+      # - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # - ./traefik-logs:/var/log/traefik
+    networks:
+      - traefik-public
+    labels:
+      - "traefik.http.routers.proxy.rule=Host(`proxy.localhost`)"
+      - "traefik.http.routers.proxy.service=proxy-service"
+      - traefik.http.routers.proxy.middlewares=myauth
+      # dummy service fro swarm port detection.
+      - traefik.http.services.proxy-service.loadbalancer.server.port=8080
+      # Account: admin/Admin@123
+      - "traefik.http.middlewares.myauth.basicauth.users=admin:$$apr1$$ekn6mbFe$$4Oe0X1eC9DUbpYgF7pWfY."
+  
+  database:
+    image: mariadb
+    container_name: database
+    restart: unless-stopped
+    # command: ["mysqld", "--mysql-native-password=ON"]
+    env_file: .env
+    environment:
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
+      - MYSQL_DATABASE=${MYSQL_DATABASE}
+      - MYSQL_USER=${MYSQL_USER}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+    volumes:
+      - ./mysql:/var/lib/mysql
+      # - ./db-dumps:/docker-entrypoint-initdb.d
+    networks:
+      - traefik-public
+    deploy:
+      resources:
+        limits:
+          memory: 2048m
+    labels:
+        - "traefik.enable=false"
+
+  phpmyadmin:
+    image: phpmyadmin
+    container_name: phpmyadmin
+    depends_on:
+      - database
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      PMA_HOST: ${PMA_HOST}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    labels:
+      - "traefik.http.routers.phpadmin.rule=Host(`phpadmin.localhost`)"
+      - "traefik.http.routers.phpadmin.service=phpadmin-service"
+      - "traefik.http.services.phpadmin-service.loadbalancer.server.port=80"
+    networks:
+      - traefik-public
+
+  wp1:
+    # build: .
+    image: wordpress
+    container_name: wp1
+    depends_on:
+      - database
+    restart: unless-stopped
+    env_file: .env
+    # environment:
+    #   WORDPRESS_DB_HOST: ${WORDPRESS_DB_HOST}
+    #   WORDPRESS_DB_NAME: ${WORDPRESS_DB_NAME}
+    #   WORDPRESS_DB_USER: ${WORDPRESS_DB_USER}
+    #   WORDPRESS_DB_PASSWORD: ${WORDPRESS_DB_PASSWORD}
+    labels:
+      - "traefik.http.routers.wp1.rule=Host(`wp1.localhost`)"
+      - "traefik.http.routers.wp1.service=wp1-service"
+      - "traefik.http.services.wp1-service.loadbalancer.server.port=80"
+    volumes:
+      - ./wp-html:/var/www/html
+      - ./config/uploads.ini:/usr/local/etc/php/conf.d/uploads.ini
+    networks:
+      - traefik-public
+
+  wp-cli:
+    image: wordpress:cli
+    user: '82'
+    container_name: wp-cli
+    depends_on:
+      - database
+      - wp1
+    volumes:
+      - ./wp-html:/var/www/html
+      # - ./bin/install-wp.sh:/usr/local/bin/init.sh
+    # entrypoint: ["/usr/local/bin/init.sh"]
+    command: >
+      /bin/sh -c '
+      sleep 10;
+      wp core install 
+      --path="/var/www/html"
+      --skip-themes
+      --skip-plugins
+      --allow-root
+      --title=${TITLE}
+      --url=${URL}
+      --admin_user=${ADMIN_USER}
+      --admin_password=${ADMIN_PASSWORD}
+      --admin_email=${ADMIN_EMAIL}
+      '
+    env_file: .env
+    # environment:
+    #   WORDPRESS_DB_HOST: ${WORDPRESS_DB_HOST}
+    #   WORDPRESS_DB_NAME: ${WORDPRESS_DB_NAME}
+    #   WORDPRESS_DB_USER: ${WORDPRESS_DB_USER}
+    #   WORDPRESS_DB_PASSWORD: ${WORDPRESS_DB_PASSWORD}
+    networks:
+      - traefik-public
+
+networks:
+  traefik-public:

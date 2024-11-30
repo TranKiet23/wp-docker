@@ -1,0 +1,85 @@
+services:
+  phpmyadmin:
+    depends_on:
+      - database
+    image: phpmyadmin
+    restart: unless-stopped
+    # ports:
+    #   - 8081:80
+    env_file: .env
+    networks:
+      - wordpress-network
+      - proxy
+    labels:
+      # Enable Traefik for this service, to make it available in the proxy network
+      - "traefik.enable=true"
+      # Use the proxy network to join traefik (declared below)
+      - "traefik.docker.network=proxy"
+      # HTTP config redirect to HTTPS
+      - "traefik.http.routers.phpadmin.entrypoints=web"
+      - "traefik.http.routers.phpadmin.rule=Host(`phpadmin.vtvcrawler.xyz`)"
+      - "traefik.http.routers.phpadmin.middlewares=https-redirect"
+      # HTTPS config
+      - "traefik.http.routers.phpadmin-secure.entrypoints=websecure"
+      - "traefik.http.routers.phpadmin-secure.rule=Host(`phpadmin.vtvcrawler.xyz`)"
+      - "traefik.http.routers.phpadmin-secure.tls.certresolver=myresolver"
+      # Enable TLS
+      - "traefik.http.routers.phpadmin-secure.tls=true"
+      - "traefik.http.routers.phpadmin-secure.service=phpadmin-service"
+      - "traefik.http.services.phpadmin-service.loadbalancer.server.port=80"
+
+  wordpress:
+    depends_on:
+      - database
+    image: wordpress
+    restart: unless-stopped
+    # ports:
+      # - 8080:80
+    env_file: .env
+    volumes:
+      - ./wp-content:/var/www/html/wp-content
+    networks:
+      - wordpress-network
+      - proxy
+    labels:
+      # Enable Traefik for this service, to make it available in the proxy network
+      - "traefik.enable=true"
+      # Use the proxy network to join traefik (declared below)
+      - "traefik.docker.network=proxy"
+      # HTTP config redirect to HTTPS
+      - "traefik.http.routers.woedpress.entrypoints=web"
+      - "traefik.http.routers.woedpress.rule=Host(`wp.vtvcrawler.xyz`)"
+      - "traefik.http.routers.woedpress.middlewares=https-redirect"
+      # HTTPS config
+      - "traefik.http.routers.woedpress-secure.entrypoints=websecure"
+      - "traefik.http.routers.woedpress-secure.rule=Host(`wp.vtvcrawler.xyz`)"
+      - "traefik.http.routers.woedpress-secure.tls.certresolver=myresolver"
+      # Enable TLS
+      - "traefik.http.routers.woedpress-secure.tls=true"
+      - "traefik.http.routers.woedpress-secure.service=woedpress-secure"
+      - "traefik.http.services.woedpress-secure.loadbalancer.server.port=80"
+  
+  database:
+    # We use a mariadb image which supports both amd64 & arm64 architecture
+    image: mariadb
+    restart: unless-stopped
+    ports:
+      - 3306:3306
+    env_file: .env
+    volumes:
+      - db-data:/var/lib/mysql
+    networks:
+      - wordpress-network
+    deploy:
+      resources:
+        limits:
+          memory: 2048m
+
+volumes:
+  db-data:
+
+networks:
+  wordpress-network:
+    driver: bridge 
+  proxy:
+    external: true
